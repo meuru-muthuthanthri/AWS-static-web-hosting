@@ -1,0 +1,101 @@
+Description: "Host a static site with AWS"
+Parameters:
+  DomainName:
+    Description: Name of the domain you want to obtain the certificate. Eg. site.example.com
+    Type: String
+  MainDomainName:
+    Description: Name of the main domain you want to obtain the certificate. Eg. example.com
+    Type: String
+  certificateARN:
+    Description: ARN of the ACM certificate
+    Type: String
+Resources:
+  StaticSiteS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: PublicRead
+      BucketName: !Ref DomainName
+      MetricsConfigurations:
+        - Id: EntireBucket
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+    DeletionPolicy: Delete
+  StaticSiteBucketPoolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StaticSiteS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 's3:GetObject'
+            Effect: Allow
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref StaticSiteS3Bucket
+                - /*
+            Principal: '*'
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CDN for S3-backed website
+        Origins:
+          - DomainName: !GetAtt StaticSiteS3Bucket.RegionalDomainName
+            Id: !Select [1, !Split ["//", !GetAtt StaticSiteS3Bucket.WebsiteURL]]
+            S3OriginConfig:
+              OriginAccessIdentity:
+                !Join ['', ['origin-access-identity/cloudfront/', !Ref CloudFrontOriginAccessIdentity]]
+        Enabled: true
+        DefaultCacheBehavior:
+          Compress: true
+          DefaultTTL: 86400
+          ForwardedValues:
+            QueryString: true
+          MaxTTL: 31536000
+          ViewerProtocolPolicy: 'redirect-to-https'
+          TargetOriginId: !Select [1, !Split ["//", !GetAtt StaticSiteS3Bucket.WebsiteURL]]
+        Aliases:
+          - !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref certificateARN
+          MinimumProtocolVersion: 'TLSv1.2_2021'
+          SslSupportMethod: 'sni-only'
+        HttpVersion: 'http2'
+        DefaultRootObject: 'index.html'
+        IPV6Enabled: true
+
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'CloudFront OAI for ${DomainName}'
+
+  Route53RecordSetGroup:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Sub '${MainDomainName}.'
+      RecordSets:
+      - Name: !Ref DomainName
+        Type: 'A'
+        AliasTarget:
+          DNSName: !GetAtt 'CloudFrontDistribution.DomainName'
+          EvaluateTargetHealth: false
+          # The  following HosteZoneId is always used for alias records pointing to CF.
+          HostedZoneId: 'Z2FDTNDATAQYW2'
+Outputs:
+  WebsiteURL:
+    Value: !GetAtt
+      - StaticSiteS3Bucket
+      - WebsiteURL
+    Description: URL for website hosted on S3
+  S3BucketSecureURL:
+    Value: !Join
+      - ''
+      - - 'https://'
+        - !GetAtt
+          - StaticSiteS3Bucket
+          - DomainName
+    Description: Name of S3 bucket to hold website content
