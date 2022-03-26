@@ -57,6 +57,11 @@ Resources:
           MaxTTL: 31536000
           ViewerProtocolPolicy: 'redirect-to-https'
           TargetOriginId: !Select [1, !Split ["//", !GetAtt StaticSiteS3Bucket.WebsiteURL]]
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 0
+            ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: '/index.html'
         Aliases:
           - !Ref DomainName
         ViewerCertificate:
